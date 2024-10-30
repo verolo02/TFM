@@ -177,6 +177,8 @@ for tipo in set(top_20_fg['cmps']):
 
 # %%
 
+# IMAGEN DE LOS 20 GRUPOS FUNCIONALES MÁS COMUNES
+
 from rdkit import Chem
 from rdkit.Chem import Draw
 from IPython.display import display
@@ -195,6 +197,8 @@ for tipo in set(top_20_fg['cmps']):
 
 
 # %%
+
+# Count statistics of FGs in the different compound sets
 
 import pandas as pd
 import ast
@@ -258,6 +262,9 @@ tabla_distribucion_20 = pd.DataFrame(resultado_tabla20)
 
 
 # %%
+
+#  Count statistics of aromatic atom- and heteroatom-containing FGs in the different 
+# compound sets
 
 import pandas as pd
 
@@ -326,6 +333,8 @@ tabla_ar_het = pd.DataFrame(resultado_tablaarhet)
 
 # %%
 
+#  Count statistics of FGs containing O, N, S, P, or halogen atoms (X) by compound set
+
 import pandas as pd
 import numpy as np
 
@@ -378,6 +387,8 @@ tablaONSP = pd.DataFrame(resultados_tablaONSP)
 
 # %%
 
+# EXPORTAR TABLAS A EXCEL
+
 import pandas as pd
 
 ruta_tablas = r'C:\Users\Vero\Desktop\UOC\3 cuatri\TFM\tablas excel'
@@ -388,6 +399,8 @@ tablaONSP.to_excel(f'{ruta_tablas}\\tablaONSP.xlsx', index=False)
 
 
 # %%
+
+# CREACIÓN MATRICES CORRELACIÓN
 
 import numpy as np
 import pandas as pd
@@ -423,11 +436,18 @@ for tipo in top_20_fg['cmps'].unique():
                 matriz_coocurrencia[index_i, index_j] += 1
                 if i != j:
                     matriz_coocurrencia[index_j, index_i] += 1
+                    
+    # Omitimos las diagonales.
+    
+    matriz_coocurrencia = matriz_coocurrencia.astype(float)
+    np.fill_diagonal(matriz_coocurrencia, np.nan)
     
     matrices[tipo] = pd.DataFrame(matriz_coocurrencia, index=top_fgs, columns=top_fgs)
 
 
 # %%
+
+# REPRESENTACIÓN MATRIZ CORRELACIÓN
 
 import seaborn as sns
 import matplotlib.pyplot as plt
@@ -435,9 +455,343 @@ import matplotlib.pyplot as plt
 
 for tipo, matriz in matrices.items():
     plt.figure(figsize=(10, 8))
-    sns.heatmap(matriz, cmap='BuPu')
+    sns.heatmap(matriz, cmap='YlGnBu')
     plt.title(f'Matriz Co-ocurrencia {tipo}')
     plt.show()
+
+
+# %%
+
+# CÁLCULO PROPIEDADES 15 GRUPOS FUNCIONALES MÁS COMUNES POR COMPUESTOS
+
+# DA PROBLEMAS EN NAR, OAR Y SAR YA QUE SALE LA MAYORIA DE LAS PROPIEDADES 0.
+
+import pandas as pd
+from rdkit import Chem
+from rdkit.Chem import rdMolDescriptors, Descriptors, Crippen
+from rdkit.Chem import QED
+
+
+# Sacamos los 15 grupos funcionales más importantes por compuesto.
+
+top_15_fg = fg_dist_grupos.groupby('cmps').head(15)
+
+
+# Función para sanitacizamos la mólecula, la preparamos para que no tenga errores a la hora de calcular las propiedades.
+
+def preparar_molecula(mol):
+    try:
+        Chem.SanitizeMol(mol)
+        return mol
+    except:
+        return None
+    
+
+# Función de cálculo de las propiedades.
+
+def calcular_propiedades(mol):
+    if mol is None:
+        return None
+
+    # Topological Polar Surface Area (TPSA).
+    
+    tpsa = rdMolDescriptors.CalcTPSA(mol)
+
+    # LogP (octanol/water partition coefficient).
+    
+    logp = Crippen.MolLogP(mol)
+
+    # Number of rotatable bonds (RB).
+    
+    rb = Descriptors.NumRotatableBonds(mol)
+
+    # Number of hydrogen bond donors (HBD).
+    
+    hbd = rdMolDescriptors.CalcNumHBD(mol)
+
+    # Number of hydrogen bond acceptors (HBA).
+    
+    hba = rdMolDescriptors.CalcNumHBA(mol)
+
+    # Molecular weight (MW).
+    
+    mw = Descriptors.MolWt(mol)
+
+    # Number of rings (nRing).
+    
+    nring = Descriptors.RingCount(mol)
+
+    # Number of aromatic rings (nAromaticRing).
+    
+    naring = rdMolDescriptors.CalcNumAromaticRings(mol)
+    
+    # Quantitative Estimation of Drug-likeness (QED)
+    
+    qed_value = QED.qed(mol)  
+    
+    # Fracción de carbonos sp3 (Fsp3)
+    
+    fsp3 = rdMolDescriptors.CalcFractionCSP3(mol)
+    
+    
+    return [tpsa, logp, rb, hbd, hba, mw, nring, naring, qed_value, fsp3]
+
+
+# Función para aplicar el cálculo de propiedades por compuesto.
+
+def procesar_compuestos(row):
+    mol = preparar_molecula(row['fgmol'])
+    propiedades = calcular_propiedades(mol)
+
+    return pd.Series({
+        'TPSA': propiedades[0],
+        'LogP': propiedades[1],
+        'Rotatable Bonds': propiedades[2],
+        'HBD': propiedades[3],
+        'HBA': propiedades[4],
+        'MW': propiedades[5],
+        'Number of Rings': propiedades[6],
+        'Aromatic Rings': propiedades[7],
+        'QED': propiedades[8],
+        'Fsp3': propiedades[9]
+    })
+
+top_15_fg_propiedades = top_15_fg.apply(procesar_compuestos, axis=1)
+
+
+top_15_fg_propiedades['cmps'] = top_15_fg['cmps'].values
+
+
+# %%
+
+# EXPORTAR TABLAS EXCEL
+
+ruta_tablas = r'C:\Users\Vero\Desktop\UOC\3 cuatri\TFM\tablas excel'
+
+top_15_fg_propiedades.to_excel(f'{ruta_tablas}\\top_15_fg_propiedades.xlsx', index=False)
+
+
+
+# %%
+
+# BOXPLOT CON OUTLIERS
+
+import pandas as pd
+import seaborn as sns
+import matplotlib.pyplot as plt
+
+# Se realizan gráficos boxplots de las propiedades
+
+# tpsa, logp, rb, hbd, hba, mw, nring, naring, qed_value, fsp3
+
+propiedades_graficos = ['TPSA', 'LogP', 'Rotatable Bonds', 'HBD', 'HBA', 'MW', 'QED', 'Fsp3']
+
+fig, axes = plt.subplots(nrows=2, ncols=4, figsize=(20, 10)) 
+axes = axes.flatten() 
+
+for i, propiedad in enumerate(propiedades_graficos):
+    sns.boxplot(x='cmps', y=propiedad, data=top_15_fg_propiedades, palette='hls', ax=axes[i])
+    
+    sns.swarmplot(x='cmps', y=propiedad, data=top_15_fg_propiedades, color='black', ax=axes[i])
+
+    axes[i].set_title(f'Distribución de {propiedad}', fontsize=16)
+    axes[i].set_xlabel('Compuestos', fontsize=12)
+    axes[i].set_ylabel(propiedad, fontsize=12)
+    
+plt.tight_layout()
+
+# %%
+
+# BOXPLOT SIN OUTLIERS
+
+import pandas as pd
+import seaborn as sns
+import matplotlib.pyplot as plt
+
+# Filtramos outliers
+
+def filtrar_outliers(outliers, propiedad):
+    q1 = outliers[propiedad].quantile(0.25)
+    q3 = outliers[propiedad].quantile(0.75)
+    iqr = q3 - q1
+    limites_inferiores = q1 - 1.5 * iqr
+    limites_superiores = q3 + 1.5 * iqr
+    return outliers[(outliers[propiedad] >= limites_inferiores) & (outliers[propiedad] <= limites_superiores)]
+
+
+propiedades_graficos = ['TPSA', 'LogP', 'Rotatable Bonds', 'HBD', 'HBA', 'MW', 'QED', 'Fsp3']
+
+fig, axes = plt.subplots(nrows=2, ncols=4, figsize=(20, 10)) 
+axes = axes.flatten() 
+
+for i, propiedad in enumerate(propiedades_graficos):
+    top_15_filtrado = filtrar_outliers(top_15_fg_propiedades, propiedad)
+
+    sns.boxplot(x='cmps', y=propiedad, data=top_15_filtrado, palette='hls', ax=axes[i])
+    sns.swarmplot(x='cmps', y=propiedad, data=top_15_filtrado, color='black', ax=axes[i])
+
+    axes[i].set_title(f'Distribución de {propiedad}', fontsize=16)
+    axes[i].set_xlabel('Compuestos', fontsize=12)
+    axes[i].set_ylabel(propiedad, fontsize=12)
+
+plt.tight_layout()
+plt.show()
+
+
+# %%
+
+# VIOLINPLOT CON OUTLIERS
+
+import pandas as pd
+import seaborn as sns
+import matplotlib.pyplot as plt
+
+
+propiedades_graficos = ['TPSA', 'LogP', 'Rotatable Bonds', 'HBD', 'HBA', 'MW', 'QED', 'Fsp3']
+
+fig, axes = plt.subplots(nrows=2, ncols=4, figsize=(20, 10)) 
+axes = axes.flatten() 
+
+for i, propiedad in enumerate(propiedades_graficos):
+    sns.violinplot(x='cmps', y=propiedad, data=top_15_fg_propiedades, palette='hls', ax=axes[i])
+    sns.swarmplot(x='cmps', y=propiedad, data=top_15_fg_propiedades, color='black', ax=axes[i])
+
+    axes[i].set_title(f'Distribución de {propiedad}', fontsize=16)
+    axes[i].set_xlabel('Compuestos', fontsize=12)
+    axes[i].set_ylabel(propiedad, fontsize=12)
+    
+plt.tight_layout()
+plt.show()
+
+# %%
+
+
+# VIOLIN PLOTS SIN OUTLIERS
+
+import pandas as pd
+import seaborn as sns
+import matplotlib.pyplot as plt
+import numpy as np
+
+
+propiedades_graficos = ['TPSA', 'LogP', 'Rotatable Bonds', 'HBD', 'HBA', 'MW', 'QED', 'Fsp3']
+
+fig, axes = plt.subplots(nrows=2, ncols=4, figsize=(20, 10)) 
+axes = axes.flatten() 
+
+for i, propiedad in enumerate(propiedades_graficos):
+    top_15_filtrado = filtrar_outliers(top_15_fg_propiedades, propiedad)
+
+    sns.violinplot(x='cmps', y=propiedad, data=top_15_filtrado, palette='hls', ax=axes[i], inner=None)
+    sns.swarmplot(x='cmps', y=propiedad, data=top_15_filtrado, color='black', ax=axes[i])
+
+    axes[i].set_title(f'Distribución de {propiedad}', fontsize=16)
+    axes[i].set_xlabel('Compuestos', fontsize=12)
+    axes[i].set_ylabel(propiedad, fontsize=12)
+
+plt.tight_layout()
+plt.show()
+
+
+# %%
+
+import pandas as pd
+from scipy.stats import kruskal
+
+# Realizamos la prueba de Krustal-Wallis sobre las propiedades de los distintos compuestos.
+
+kruskal_resultados = {}
+
+for propiedad in propiedades_graficos:
+    grupos = [group[propiedad] for tipo, group in top_15_fg_propiedades.groupby('cmps')]
+  
+    estadistico, p_valor = kruskal(*grupos)
+
+    kruskal_resultados[propiedad] = {'estadistico': estadistico, 'p_valor': p_valor}
+
+kruskal_resultados_df = pd.DataFrame(kruskal_resultados).T
+print(kruskal_resultados_df)
+
+
+# %%
+
+
+import pandas as pd
+from rdkit import Chem
+from rdkit.Chem import rdMolDescriptors, Descriptors, Crippen
+from rdkit.Chem import QED
+
+
+def preparar_molecula(mol):
+    try:
+        Chem.SanitizeMol(mol)
+        return mol
+    except:
+        return None
+
+def calcular_propiedades(mol):
+    if mol is None:
+        return None
+
+
+    tpsa = rdMolDescriptors.CalcTPSA(mol)
+    logp = Crippen.MolLogP(mol)
+    rb = Descriptors.NumRotatableBonds(mol)
+    hbd = rdMolDescriptors.CalcNumHBD(mol)
+    hba = rdMolDescriptors.CalcNumHBA(mol)
+    mw = Descriptors.MolWt(mol)
+    qed_value = QED.qed(mol)
+    fsp3 = rdMolDescriptors.CalcFractionCSP3(mol)
+
+
+    ring_info = mol.GetRingInfo()
+    nring = ring_info.NumRings()
+    naring = rdMolDescriptors.CalcNumAromaticRings(mol)
+
+
+    print(f"\nMolécula: {Chem.MolToSmiles(mol)}")
+    print(f"Número total de anillos: {nring}")
+    print(f"Número de anillos aromáticos: {naring}")
+    
+    # Detalles de cada anillo
+    for i, atoms_in_ring in enumerate(ring_info.AtomRings()):
+        print(f"Átomos en el anillo {i+1}: {atoms_in_ring}")
+
+    for i, bonds_in_ring in enumerate(ring_info.BondRings()):
+        print(f"Enlaces en el anillo {i+1}: {bonds_in_ring}")
+    
+    return [tpsa, logp, rb, hbd, hba, mw, nring, naring, qed_value, fsp3]
+
+
+def procesar_compuestos(row):
+    mol = preparar_molecula(row['fgmol'])
+    propiedades = calcular_propiedades(mol)
+
+    return pd.Series({
+        'TPSA': propiedades[0],
+        'LogP': propiedades[1],
+        'Rotatable Bonds': propiedades[2],
+        'HBD': propiedades[3],
+        'HBA': propiedades[4],
+        'MW': propiedades[5],
+        'Number of Rings': propiedades[6],
+        'Aromatic Rings': propiedades[7],
+        'QED': propiedades[8],
+        'Fsp3': propiedades[9]
+    })
+
+
+top_15_fg_propiedades = top_15_fg.apply(procesar_compuestos, axis=1)
+top_15_fg_propiedades['cmps'] = top_15_fg['cmps'].values
+
+
+# %%
+
+grupos_funcionales_comunes = set.intersection(*top_20_fg.groupby('cmps')['fgsmi'].apply(set))
+comunes_drug_foodfl = set(top_20_fg[top_20_fg['cmps'] == 'Drug']['fgsmi']).intersection(top_20_fg[top_20_fg['cmps'] == 'FoodFL']['fgsmi'])
+comunes_drug_foodnofl = set(top_20_fg[top_20_fg['cmps'] == 'Drug']['fgsmi']).intersection(top_20_fg[top_20_fg['cmps'] == 'FoodnoFL']['fgsmi'])
+
+
 
 
 
