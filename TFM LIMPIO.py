@@ -11,11 +11,15 @@ Created on Mon Nov 11 11:14:26 2024
 import fgs
 import pandas as pd
 import rdkit
+import chembl_structure_pipeline
 import scikit_posthocs as sp
 import matplotlib.pyplot as plt
 import seaborn as sns
 import ast
 import numpy as np
+import IPython
+import scipy.stats
+import statsmodels
 from rdkit import Chem
 from rdkit.Chem import inchi
 from chembl_structure_pipeline import standardizer as sdz
@@ -26,6 +30,7 @@ from rdkit.Chem import Draw
 from IPython.display import display
 from itertools import combinations
 from scipy.stats import kruskal
+from statsmodels.stats.multitest import multipletests
 
 
 
@@ -590,25 +595,32 @@ for fgsmi, df in dataframes_por_fgsmi.items():
 # BLOQUE 5. ESTUDIOS ESTADÍSTICOS PROPIEDADES.
 
 
-#Krustal-Wallis sobre las propiedades para CADA fgsmi COMÚN por cmps.
+# Krustal-Wallis sobre las propiedades para CADA fgsmi COMÚN por cmps.
 
 
 propiedades = ['TPSA', 'LogP', 'Rotatable Bonds', 'HBD', 'HBA', 'MW', 'Number of Rings', 'Aromatic Rings', 'QED', 'Fsp3']
-
 
 kruskal_resultados_totales = {}
 
 
 for fgsmi, df in dataframes_por_fgsmi.items():
     kruskal_resultados = {}  
-    
+    p_values = []
+
     for propiedad in propiedades:
         grupos = [group[propiedad].dropna() for tipo, group in df.groupby('cmps')]
-        
         estadistico, p_valor = kruskal(*grupos)
         
         kruskal_resultados[propiedad] = {'estadistico': estadistico, 'p_valor': p_valor}
+        p_values.append(p_valor)
+
+    _, p_values_corr, _, _ = multipletests(p_values, alpha=0.05, method='fdr_bh')
+
+
+    for i, propiedad in enumerate(propiedades):
+        kruskal_resultados[propiedad]['p_valor_corr'] = p_values_corr[i]
     
+
     kruskal_resultados_totales[fgsmi] = pd.DataFrame(kruskal_resultados).T
 
 
@@ -631,7 +643,7 @@ for fgsmi, df in dataframes_por_fgsmi.items():
     conover_resultados = {}
     
     for propiedad, resultado in kruskal_resultados_totales[fgsmi].iterrows():
-        if resultado['p_valor'] < 0.05:
+        if resultado['p_valor_corr'] < 0.05:
             posthoc_conover = sp.posthoc_conover(df, val_col=propiedad, group_col='cmps', p_adjust='holm')
             conover_resultados[propiedad] = posthoc_conover
             
@@ -653,8 +665,8 @@ with pd.ExcelWriter(r'C:\Users\Vero\Desktop\UOC\3 cuatri\TFM\tablas excel\conove
 
 # CLES.
 
-propiedades = ['TPSA', 'LogP', 'Rotatable Bonds', 'HBD', 'HBA', 'MW', 'Number of Rings', 'Aromatic Rings', 'QED', 'Fsp3']
 
+propiedades = ['TPSA', 'LogP', 'Rotatable Bonds', 'HBD', 'HBA', 'MW', 'Number of Rings', 'Aromatic Rings', 'QED', 'Fsp3']
 
 def calcular_cles(grupo1, grupo2):
     n = len(grupo1) * len(grupo2)
@@ -666,32 +678,38 @@ cles_resultados_totales = []
 
 
 for fgsmi, df in dataframes_por_fgsmi.items():
+    
     for propiedad in propiedades:
 
-        grupos = df.groupby('cmps')[propiedad].apply(list)
-
-        pares_grupos = combinations(grupos.index, 2)
+        kruskal_resultado = kruskal_resultados_totales[fgsmi].loc[propiedad]
         
-        for g1, g2 in pares_grupos:
-            cles_valor = calcular_cles(grupos[g1], grupos[g2])
+        if kruskal_resultado['p_valor_corr'] < 0.05:
             
-            cles_resultados_totales.append({
-                'Grupo Funcional': fgsmi,
-                'Propiedad': propiedad,
-                'Grupo1': g1,
-                'Grupo2': g2,
-                'CLES': cles_valor
-            })
-            cles_resultados_totales.append({
-                'Grupo Funcional': fgsmi,
-                'Propiedad': propiedad,
-                'Grupo1': g2,
-                'Grupo2': g1,
-                'CLES': 1 - cles_valor
-            })
+            grupos = df.groupby('cmps')[propiedad].apply(list)
 
+            pares_grupos = combinations(grupos.index, 2)
+            
+            for g1, g2 in pares_grupos:
+                cles_valor = calcular_cles(grupos[g1], grupos[g2])
+                
+                cles_resultados_totales.append({
+                    'Grupo Funcional': fgsmi,
+                    'Propiedad': propiedad,
+                    'Grupo1': g1,
+                    'Grupo2': g2,
+                    'CLES': cles_valor
+                })
+
+                cles_resultados_totales.append({
+                    'Grupo Funcional': fgsmi,
+                    'Propiedad': propiedad,
+                    'Grupo1': g2,
+                    'Grupo2': g1,
+                    'CLES': 1 - cles_valor
+                })
 
 df_cles = pd.DataFrame(cles_resultados_totales)
+
 
 
 # TABLAS EXCEL POR DATAFRAME.
@@ -780,46 +798,45 @@ compuestos_dianas_exploded = compuestos_dianas.explode('fgsmi')
 # Se crea un dataframe para ver dentro de cada cmps que grupo funcional está asociado
 # a qué dianas farmacológicas.
 
-# Agrupamos por 'cmps', 'fgsmi', 'target' y 'target_class' y contamos las ocurrencias.
+interacciones_unicas_dianas = []
 
-fgsmi_compuesto_diana = (compuestos_dianas_exploded.groupby(['cmps', 'fgsmi', 'target', 'target_class'], as_index=False)
-    .agg(n=('target', 'size')))
-
-
-# Se seleccionan las 5 'target_class' más frecuentes para cada combinación de 'cmps' y 'fgsmi'
-# dentro de los 15 FG comunes.
-
-top_5_target_class_per_cmps_fgsmi = (fgsmi_compuesto_diana[fgsmi_compuesto_diana['fgsmi'].isin(top_15_prop4_comunes['fgsmi'])]
-    .sort_values(['cmps', 'fgsmi', 'n'], ascending=[True, True, False]).groupby(['cmps', 'fgsmi']).head(5))
-
-
-# Gráfico de las target class más frecuentes por cmps y fgsmi.
-
-ncols = 4
-nrows = 2 
-
-plt.figure(figsize=(18, 6 * nrows))
-
-
-for i, fgsmi in enumerate(top_5_target_class_per_cmps_fgsmi['fgsmi'].unique()):
-    plt.subplot(nrows, ncols, i + 1)
+for fgsmi in compuestos_dianas_exploded['fgsmi'].unique():
     
-    fgsmi_data = top_5_target_class_per_cmps_fgsmi[top_5_target_class_per_cmps_fgsmi['fgsmi'] == fgsmi]
-
-    sns.barplot(
-        data=fgsmi_data,
-        x='target_class',
-        y='n',
-        hue='cmps',
-        dodge=True)
+    subset_fgsmi_dianas = compuestos_dianas_exploded[compuestos_dianas_exploded['fgsmi'] == fgsmi]
     
-    plt.title(f'{fgsmi}', fontsize=14)
-    plt.xlabel('Target Class', fontsize=12)
-    plt.ylabel('Número de Ocurrencias (n)', fontsize=12)
+    subset_fgsmi_unique_dianas = subset_fgsmi_dianas[['inchi', 'cmps', 'target', 'target_class']].drop_duplicates()
+    
+    interacciones_count_dianas = subset_fgsmi_unique_dianas.groupby(['cmps', 'target_class']).size().reset_index(name='n_interacciones')
+    
+    interacciones_count_dianas['fgsmi'] = fgsmi
+    
+    interacciones_unicas_dianas.append(interacciones_count_dianas)
+
+df_interacciones_unicas_dianas = pd.concat(interacciones_unicas_dianas, ignore_index=True)
+
+
+# Quedarnos sólo con lAS INTERACCIONES DENTRO DE LOS que están en los 8 comunes por cmps.
+
+df_filtrado_dianas = df_interacciones_unicas_dianas.merge(top_15_prop4_comunes[['cmps', 'fgsmi']], on=['cmps', 'fgsmi'], how='inner')
+
+
+# BARPLOT por fgsmi de las target_class asocidas.
+
+
+for fgsmi in df_filtrado_dianas['fgsmi'].unique():
+
+    subset_fgsmi_dianas = df_filtrado_dianas[df_filtrado_dianas['fgsmi'] == fgsmi]
+
+    plt.figure(figsize=(10, 6))
+    
+    sns.barplot(data=subset_fgsmi_dianas,x='target_class', y='n_interacciones',hue='cmps')
+    
+    plt.title(f'Interacciones por target_class para el grupo funcional: {fgsmi}')
+    plt.xlabel('Target Class')
+    plt.ylabel('Número de Interacciones Únicas')
     plt.xticks(rotation=90)
-    plt.legend(fontsize='small')
-
-plt.tight_layout()
-
+    
+    plt.legend(title='cmps')
+    plt.tight_layout()
 
 
