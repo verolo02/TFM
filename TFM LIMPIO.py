@@ -93,6 +93,11 @@ compuestos[["img_text","fgs","fgsmi","fgmol"]] = compuestos.apply(lambda x: pd.S
 fg_dist_sep = compuestos.explode(["fgsmi","fgmol"])[["cmps", "fgsmi", "fgmol", "foodb_id", "pmol"]]
 
 
+# Se mira el número de FGs únicos en el total de compuestos.
+
+num_fgsmi_unicos = fg_dist_sep["fgsmi"].nunique()
+
+
 # Se cuentan los grupos funcionales por compuestos.
 
 fg_dist_grupos = (fg_dist_sep.groupby(["cmps", "fgsmi"], as_index=False)
@@ -655,11 +660,13 @@ for fgsmi, df in dataframes_por_fgsmi.items():
 
 with pd.ExcelWriter(r'C:\Users\Vero\Desktop\UOC\3 cuatri\TFM\tablas excel\conover_resultados_totales.xlsx', engine='openpyxl') as writer:
     for fgsmi, conover_resultados in conover_resultados_totales.items():
+        hoja_fgsmi = pd.DataFrame()
         for propiedad, conover_df in conover_resultados.items():
-            nombre_hoja = f"{fgsmi}_{propiedad}"
-            nombre_hoja_limpio = "".join(c for c in nombre_hoja if c.isalnum() or c in " _-")
-            
-            conover_df.to_excel(writer, sheet_name=nombre_hoja_limpio, index=True)
+            conover_df['Propiedad'] = propiedad
+            hoja_fgsmi = pd.concat([hoja_fgsmi, conover_df])
+
+        nombre_hoja_limpio = "".join(c for c in fgsmi if c.isalnum() or c in " _-")
+        hoja_fgsmi.to_excel(writer, sheet_name=nombre_hoja_limpio, index=True)
 
 
 
@@ -780,17 +787,42 @@ for tipo, frec_compoundset in frec_heatmap_fgvsmycl.groupby(level=0):
 # BLOQUE 7. FG, CMPS Y SUS DIANAS.
 
 
-# Añadimos las dianas.
+# Añadimos las dianas tanto las publicadas como las predichas.
 
-dianas = pd.read_excel(r'C:\Users\Vero\Desktop\UOC\3 cuatri\TFM\dianas.xlsx')
+ruta_dianas = r'C:\Users\Vero\Desktop\UOC\3 cuatri\TFM\dianas.xlsx'
+
+dianas_s1 = pd.read_excel(ruta_dianas, sheet_name='Table S1')
+dianas_s2 = pd.read_excel(ruta_dianas, sheet_name='Table S2')
+
+drug_publi = pd.read_csv(r'C:\Users\Vero\Desktop\UOC\3 cuatri\TFM\drugtars_published.csv', sep=';')
+drug_predi = pd.read_csv(r'C:\Users\Vero\Desktop\UOC\3 cuatri\TFM\drugtars_predicted.csv',  sep=';')
+
+# Renombrar ciertas columnas para poder hacer el merge y las operaciones posteriores.
+
+drug_publi.rename(columns={'tarname': 'target', 'tcl': 'target_class'}, inplace=True)
+drug_predi.rename(columns={'tarname': 'target', 'tcl': 'target_class'}, inplace=True)
 
 
 # Se crea un dataframe con los compuestos que tienen dianas.
 
-compuestos_dianas = pd.merge(compuestos, dianas, on='foodb_id', how='inner')
+
+# Merge con dianas_s1 y dianas_s2 usando foodb_id.
+
+merge_s1_s2 = pd.merge(compuestos, pd.concat([dianas_s1, dianas_s2], ignore_index=True), on='foodb_id', how='inner')
 
 
-# Se crea un dataframe con las moléculas+dianas.
+# Unir drug publicadas y predichas.
+
+drug_comb = pd.concat([drug_publi, drug_predi], ignore_index=True)
+
+# Merge de drugs usando hmdb_id (que se renombra como foodb_id en compuestos).
+
+merge_predi_publi = pd.merge(compuestos, drug_comb, left_on='foodb_id', right_on='hmdb_id', how='inner')
+
+
+
+compuestos_dianas = pd.concat([merge_s1_s2, merge_predi_publi], ignore_index=True)
+
 
 compuestos_dianas_exploded = compuestos_dianas.explode('fgsmi')
 
@@ -819,24 +851,51 @@ df_interacciones_unicas_dianas = pd.concat(interacciones_unicas_dianas, ignore_i
 
 df_filtrado_dianas = df_interacciones_unicas_dianas.merge(top_15_prop4_comunes[['cmps', 'fgsmi']], on=['cmps', 'fgsmi'], how='inner')
 
+# Ordeno para una mejor visualización de los resultados por FG, compuesto y cmps.
+
+df_filtrado_dianas = df_filtrado_dianas.sort_values(by=['fgsmi', 'n_interacciones', 'cmps'],ascending=[True, False, True])
+
 
 # BARPLOT por fgsmi de las target_class asocidas.
 
 
+color_int = {'FoodnoFL': 'dodgerblue', 'FoodFL': 'coral', 'Drug': 'limegreen'}
+
 for fgsmi in df_filtrado_dianas['fgsmi'].unique():
-
     subset_fgsmi_dianas = df_filtrado_dianas[df_filtrado_dianas['fgsmi'] == fgsmi]
+    subset_fgsmi_dianas = subset_fgsmi_dianas[subset_fgsmi_dianas['n_interacciones'] > 0]   
+    
+    plt.figure(figsize=(12, 8))
+    
+    ax = sns.barplot(
+        data=subset_fgsmi_dianas, 
+        x='target_class', 
+        y='n_interacciones', 
+        hue='cmps', 
+        palette=color_int)
 
-    plt.figure(figsize=(10, 6))
+    for p in ax.patches:
+        if fgsmi == 'O=C([R])O[R]' or fgsmi == 'C=C':
+            y_offset = 300
+        else:
+            y_offset = 30
+
+        ax.text(
+            x=p.get_x() + p.get_width() / 2, 
+            y=p.get_height() + y_offset,
+            s=f'{int(p.get_height())}',
+            ha='center',
+            rotation=90,
+            va='bottom')
     
-    sns.barplot(data=subset_fgsmi_dianas,x='target_class', y='n_interacciones',hue='cmps')
-    
-    plt.title(f'Interacciones por target_class para el grupo funcional: {fgsmi}')
-    plt.xlabel('Target Class')
-    plt.ylabel('Número de Interacciones Únicas')
-    plt.xticks(rotation=90)
-    
-    plt.legend(title='cmps')
+    plt.title(f'Interacciones por target_class para el grupo funcional: {fgsmi}', fontsize=14)
+    plt.xlabel('Target Class', fontsize=12)
+    plt.ylabel('Número de Interacciones Únicas', fontsize=12)
+    plt.xticks(rotation=90, fontsize=10)
+    plt.legend(title='cmps', fontsize=10)
     plt.tight_layout()
+    plt.show()
+
+
 
 
