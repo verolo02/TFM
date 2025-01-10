@@ -856,49 +856,12 @@ df_filtrado_dianas = df_interacciones_unicas_dianas.merge(top_15_prop4_comunes[[
 df_filtrado_dianas = df_filtrado_dianas.sort_values(by=['fgsmi', 'n_interacciones', 'cmps'],ascending=[True, False, True])
 
 
+
+
+# %%
+
 # BARPLOT por fgsmi de las target_class asocidas.
 
-# %%
-
-
-color_int = {'FoodnoFL': 'dodgerblue', 'FoodFL': 'coral', 'Drug': 'limegreen'}
-
-for fgsmi in df_filtrado_dianas['fgsmi'].unique():
-    subset_fgsmi_dianas = df_filtrado_dianas[df_filtrado_dianas['fgsmi'] == fgsmi]
-    subset_fgsmi_dianas = subset_fgsmi_dianas[subset_fgsmi_dianas['n_interacciones'] > 0]   
-    
-    plt.figure(figsize=(12, 8))
-    
-    ax = sns.barplot(
-        data=subset_fgsmi_dianas, 
-        x='target_class', 
-        y='n_interacciones', 
-        hue='cmps', 
-        palette=color_int)
-
-    for p in ax.patches:
-        if fgsmi == 'O=C([R])O[R]' or fgsmi == 'C=C':
-            y_offset = 300
-        else:
-            y_offset = 30
-
-        ax.text(
-            x=p.get_x() + p.get_width() / 2, 
-            y=p.get_height() + y_offset,
-            s=f'{int(p.get_height())}',
-            ha='center',
-            rotation=90,
-            va='bottom')
-    
-    plt.title(f'Interacciones por target_class para el grupo funcional: {fgsmi}', fontsize=14)
-    plt.xlabel('Target Class', fontsize=12)
-    plt.ylabel('Número de Interacciones Únicas', fontsize=12)
-    plt.xticks(rotation=90, fontsize=10)
-    plt.legend(title='cmps', fontsize=10)
-    plt.tight_layout()
-    plt.show()
-
-# %%
 
 color_int = {'FoodnoFL': 'dodgerblue', 'FoodFL': 'coral', 'Drug': 'limegreen'}
 
